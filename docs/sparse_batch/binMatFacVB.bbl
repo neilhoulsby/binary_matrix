@@ -1,0 +1,35 @@
+\begin{thebibliography}{}
+
+\bibitem[Hoffman et~al., 2010]{hoffman2010}
+Hoffman, M., Blei, D., and Bach, F. (2010).
+\newblock Online learning for latent dirichlet allocation.
+\newblock {\em Advances in Neural Information Processing Systems}, 23:856--864.
+
+\bibitem[Jaakkola and Jordan, 1997]{jaakkola1997}
+Jaakkola, T. and Jordan, M. (1997).
+\newblock A variational approach to bayesian logistic regression models and
+  their extensions.
+\newblock In {\em Proceedings of the sixth international workshop on artificial
+  intelligence and statistics}. Citeseer.
+
+\bibitem[Nakajima et~al., 2010]{nakajima2010}
+Nakajima, S., Sugiyama, M., and Tomioka, R. (2010).
+\newblock Global analytic solution for variational bayesian matrix
+  factorization.
+\newblock {\em NIPS2010}.
+
+\bibitem[Raiko et~al., 2007]{raiko2007}
+Raiko, T., Ilin, A., and Juha, K. (2007).
+\newblock Principal component analysis for large scale problems with lots of
+  missing values.
+\newblock In Kok, J., Koronacki, J., Mantaras, R., Matwin, S., Mladenic, D.,
+  and Skowron, A., editors, {\em Machine Learning: ECML 2007}, volume 4701 of
+  {\em Lecture Notes in Computer Science}, pages 691--698. Springer Berlin /
+  Heidelberg.
+
+\bibitem[Seeger and Bouchard, 2012]{seeger2012}
+Seeger, M. and Bouchard, G. (2012).
+\newblock Fast variational bayesian inference for non-conjugate matrix
+  factorization models.
+
+\end{thebibliography}

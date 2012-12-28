@@ -1,0 +1,317 @@
+\documentclass{article}
+
+\title{VB for Binary Matrix Factorisatilon}
+\author{Neil Houlsby}
+\date{\today}
+
+\usepackage{fullpage}
+\usepackage{natbib}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+
+\newcommand{\obs}{O}
+\newcommand{\X}{\mathbf{X}}
+\newcommand{\A}{\mathbf{A}}
+\newcommand{\s}{\mathbf{S}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\atil}{\tilde{a}}
+\newcommand{\abar}{\bar{a}}
+\newcommand{\stil}{\tilde{s}}
+\newcommand{\sbar}{\bar{s}}
+\newcommand{\btil}{\tilde{b}}
+\newcommand{\bbar}{\bar{b}}
+\newcommand{\gtil}{\tilde{g}}
+\newcommand{\gbar}{\bar{g}}
+\newcommand{\zbar}{\bar{\zeta}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\argmax}{ \operatorname*{arg \max}} 
+\newcommand{\argmin}{ \operatorname*{arg \min}} 
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Variational Bayes for binary matrix factorisation with a logistic likelihood. This document describes the gradient descent algotithm wih zero mean prior, although removing this constraint is simple. We then present a fast approximation, however, the current method has one unsolved limitation.
+\end{abstract}
+
+\section{Introduction}
+We seek to factorise the binary matrix $\X$ (dim. $I\times J$) whose elements are binary ($x_{ij}\in\{-1,+1\}$) as the product of two lower rank matrices $\A$ (dim. $I\times K$) and $\s$ (dim. $K\times J$), i.e. $\X=\A\a$.
+We have observed only the elements $\obs$ in $\X$.
+To deal with missing data we take a probabilistic approach, using Variational Bayes for approximate inference, similar to the method in \citep{raiko2007}.
+
+\section{Model}
+We use a logistic likelihood,
+\begin{equation}
+P(\X|\A,\s) = \prod_{i=1}^I\prod_{j=1}^J p(x_{ij}|\A,\s) = \prod_{(i,j)\in\obs} \sigma \left(x_{ij}\sum_{k=1}^K a_{ik}s_{kj}\right)\,,
+\end{equation}
+where $$\sigma(z) = \frac{1}{1+e^{-z}}$$\,.
+
+As in \citep{raiko2007} we put independent Gaussian priors on the elements of $\A$ and $\s$, with unit variances on $\A$ and column varying variances on $\s$.
+This yields the following joint distribution:
+\begin{align}
+P(\X,\A,\s)&= P(\X|\A,\s)P(\A)P(\s)\notag\\ 
+&=\left[\prod_{(i,j)\in\obs}\sigma\left(x_{ij}\sum_{k=1}^K a_{ik}s_{kj})\right) \right] 
+\left[ \prod_{i=1}^I \prod_{k=1}^K \N(a_{ik};0,1) \right] \left[ \prod_{k=1}^K \prod_{j=1}^J \N(s_{kj};0,v_{s_k})  \right]\,.
+\end{align}
+
+\section{Variational Inference}
+The true posterior $p(\A,\s|X)$ is intractable.
+To perform inference we approximate the posterior with a factorised distiribution $Q(\A,\s)$, which takes the form
+\begin{equation}
+Q(\A,\s)=Q(\A)Q(\s)=\left[\prod_{ik}\N(a_{ik};\abar_{ik},\atil_{ik})\right]\left[\prod_{kj}\N(s_{kj};\sbar_{kj},\stil_{kj})\right]\,.
+\end{equation}
+The variational free energy lower bounds the marginal likelihood $P(\X)$ for all $Q(\A,\s)$. This lower bound is maximised by minimising the Kullback-Lieber divergence between the approximatilon and the true joint distribution. This means we seek to minimize the following cost with respect to the parameters of the approximation ($\abar_{ik},\atil_{ik},\sbar_{kj},\stil_{kj}$) and the hyper-parameters of the prior ($v_k^s$) $\forall i,j,k$:
+\begin{equation}
+\mathcal{C}=\E_{Q(\A,\s)}\left[\log\frac{Q(\A,\s)}{P(\X,\A,\s)} \right]
+=\sum_{(i,j)\in\obs}C_{x_{ij}} + \sum_{ik}C_{a_{ik}} + \sum_{kj}C_{s_{kj}},
+\label{eqn:cost}
+\end{equation}
+where
+\begin{align}
+C_{a_{ik}}&=\E_{Q(\A)}\left[\log Q(\A) -\log P(\A) \right]=\frac{\abar_{ik}^2+\atil_{ij}}{2}-\frac{1}{2}\log \atil_{ik}-\frac{1}{2} \notag\\
+C_{s_{kj}}&=\E_{Q(\s)}\left[\log Q(\s) -\log P(\s) \right]=\frac{\sbar_{kj}^2+\stil_{kj}}{2v_{s_k}}-\frac{1}{2}\log \frac{\stil_{kj}}{v_{s_k}}-\frac{1}{2} \notag\,.
+\end{align}
+These terms are the same as in \citep{raiko2007}, however, the terms in \eqref{eqn:cost} corresponding to the likelihood are different:
+\begin{equation}
+C_{x_{ij}}=\E_{Q(\A)Q(\s)}\left[-\log P(x_{ij}|\A,\s) \right]=-\int\prod_k\N(a_{ik};\abar_{ik},\atil_{ik})\N(s_{kj};\sbar_{kj},\stil_{kj})\log\sigma\left(x_{ij}\sum_{k}a_{ik}s_{kj}\right) d a_{ik}d s_{kj}
+\label{eqn:intract}
+\end{equation}
+which is intractable. To deal with this we follow an approach in \citep{jaakkola1997} who make a variational approximation to the function $\sigma(z)$. They lower bound this function as
+\begin{equation}
+\sigma(z)\geq\sigma(\zeta)\exp\left\{\frac{z-\zeta}{2}+\lambda(\zeta)\left(z^2-\zeta^2\right) \right\}=\tau(z,\zeta)\,.
+\end{equation}  
+where $\lambda(\zeta)=\frac{1/2-\sigma(\zeta)}{2\zeta}$. We can now replace $\sigma\left(x_{ik}\sum_{k}a_{ik}s_{kj}\right)$ in \eqref{eqn:intract} with this lower bound, which makes the calculation tractable.
+This introduces another parameter $\zeta_{ij}$ for every integral that we approximate. We also optimise over these in order to make the approximation to \eqref{eqn:intract} as good as possible. We replace $C_{x_{ij}}$ with $\hat{C}_{x_{ij}}$ which is defined as:
+\begin{align}
+\hat{C}_{x_{ij}}&=-\int\prod_k\N(a_{ik};\abar_{ik},\atil_{ik})\N(s_{kj};\sbar_{kj},\stil_{kj})\log\tau\left(x_{ij}\sum_{k}a_{ik}s_{kj},\zeta_{ij}\right) d a_{ik}d s_{kj} \notag\\
+&=-\log\sigma(\zeta_{ij})+\frac{\zeta_{ij}}{2}-\frac{x_{ij}\sum_k\abar_{ik}\sbar_{kj}}{2}-\lambda(\zeta_{ij})\left(
+\sum_k\left(\abar_{ik}^2\stil_{kj}+\atil_{ik}\sbar^2_{kj}+\atil_{ik}\stil_{kj}\right)+\left(\sum_{k}\abar_{ik}\sbar_{kj}\right)^2-\zeta_{ij}^2\right)\,.
+\label{eqn:likapproxbayes}
+\end{align} 
+
+Because we lower bound the integral, we upper bound the KL divergence. Again we can perform minimisation over the free parameters $\zeta_{ij}$.
+
+To perform optimisation we need to compute all the relevant derivatives:
+\begin{align}
+\frac{\partial \mathcal{C}}{\partial \atil_{il}} &= \frac{1}{2}-\frac{1}{2\atil_{il}}-\sum_{j|(i,j)\in\obs}\lambda(\zeta_{ij})(\sbar_{lj}^2+\stil_{lj}) \notag\\
+\frac{\partial \mathcal{C}}{\partial \stil_{lj}} &= \frac{1}{2v_{s_l}}-\frac{1}{2\stil_{lj}}-\sum_{i|(i,j)\in\obs}\lambda(\zeta_{ij})(\abar_{il}^2+\atil_{il}) \notag\\
+\frac{\partial \mathcal{C}}{\partial \abar_{il}} &= \abar_{il}-\sum_{j|(i,j)\in\obs}\frac{x_{ij}\sbar_{lj}}{2}+2\lambda(\zeta_{ij})\left[\abar_{il}\stil_{lj}+\sbar_{lj}\sum_k\abar_{ik}\sbar_{kj}\right] \notag\\
+\frac{\partial \mathcal{C}}{\partial \sbar_{lj}} &= \frac{\sbar_{lj}}{v_{s_l}}-\sum_{i|(i,j)\in\obs}\frac{x_{ij}\abar_{il}}{2}+2\lambda(\zeta_{ij})\left[\atil_{il}\sbar_{lj}+\abar_{il}\sum_k\abar_{ik}\sbar_{kj}\right] \notag\\
+\frac{\partial^2\mathcal{C}}{\partial \abar_{il}^2} &= 1 - \sum_{j|(i,j)\in\obs}2\lambda(\zeta_{ij})\left[ \stil_{lj}+\sbar_{lj}^2\right] \notag \\
+\frac{\partial^2\mathcal{C}}{\partial \sbar_{il}^2} &= \frac{1}{v_{s_l}} - \sum_{i|(i,j)\in\obs}2\lambda(\zeta_{ij})\left[ \atil_{il}+\abar_{il}^2\right] \notag \\
+\frac{\partial \mathcal{C}}{\partial v^s_k} &= \frac{1}{2v^s_k}-\sum_j\frac{\sbar_{kj}^2+\stil_{kj}}{2(v_k^s)^2} \notag
+%\frac{\partial \mathcal{C}}{\partial \zeta_{ij}} &= -\frac{1}{2}+\frac{e^{-\zeta}}{1+e^{\zeta}} - 2\zeta\lambda(\zeta) - \left(\frac{2-e^{-\zeta}}{2\zeta(1+e^{-\zeta})^2}-\frac{1}{8\zeta} \right)
+\end{align}
+
+\section{Update Operations}
+
+The VB algorithm iteratively updates the parameters in the order $\zeta$, $\{\atil_{ik}\}$, $\{\stil_{kj}\}$, $\{\abar_{ij}\}$, $\{\sbar_{kj}\}$, $\{v^s_k\}$.
+
+\subsection{Variances}
+
+The variance parameters of $Q(\A,\s)$ are updates by setting the gradient to zero:
+\begin{align}
+&\atil_{il} \leftarrow \left[1-2\sum_{j|(i,j)\in\mathcal{O}}\lambda(\zeta_{ij})(\sbar_{lj}^2+\stil_{lj} \right]^{-1}\notag\\
+&\stil_{lj} \leftarrow \left[\frac{1}{v_{s_l}}-2\sum_{i|(i,j)\in\mathcal{O}}\lambda(\zeta_{ij})\abar_{il}^2+\atil_{il} \right]^{-1}\notag
+\end{align} 
+
+\subsection{Means}
+
+The means of $Q(\A,\s)$ are learnt be gradient descent with a partial Newton update as in \citep{raiko2007}:
+\begin{equation}
+\abar_{il}\leftarrow - \gamma\left(\frac{\partial^2\mathcal{C}}{\partial\abar_{il}^2} \right)^{-\alpha}\frac{\partial \mathcal{C}}{\partial \abar_{il}}\,, \notag
+\end{equation}
+and the same for $\sbar_{lj}$. $\gamma$ and $\alpha$ are tunable learning parameters.
+
+\subsection{Prior Variance Hyperparameters}
+
+$v^s_l$ are updated by setting the gradient to zero: $$v^s_l\leftarrow \frac{1}{J}\sum_j\sbar_{lj}^2+\stil_{lj}\,.$$
+
+\subsection{Variational Parameter}
+
+The parameters $\zeta_{ij}$ are minimised by setting the gradient to zero. This leads to: 
+$$\zeta_{ij}\leftarrow \sqrt{\sum_k\left(\abar_{ik}^2\stil_{kj}+\atil_{ik}\sbar^2_{kj}+\atil_{ik}\stil_{kj}\right)+\left(\sum_{k}\abar_{ik}\sbar_{kj}\right)^2}\,.$$
+I have not proved this, but I believe that $\mathcal{C}$ is a convex function and this is the solution for the maximum.
+
+\subsection{Experimental Notes}
+Usually beat Gaussian likelihood on non-sparse matrices. But on sparse matrices this likelihood has a greater tendency to predict $-1$ everywhere.
+
+\section{Global Sparsity}
+Make $\beta$ an RV, now call it $b$ for consistency wit $a,s$, put a prior over $b$ and include it in the variational approximation of the posterior to get $Q(\A,\s,b)$. The prior is again Normal and the posterior approximation becomes:
+\begin{align}
+P(b)&=\mathcal{N}(b;0,1)\,.\notag\\
+Q(\A,\s,b)&=Q(\A)Q(\s)Q(b)=\left[\prod_{ik}\N(a_{ik};\abar_{ik},\atil_{ik})\right]\left[\prod_{kj}\N(s_{kj};\sbar_{kj},\stil_{kj})\right]\N(b;\bbar,\btil)\,.
+\end{align}
+
+The cost now becomes
+\begin{equation}
+\mathcal{C}=\E_{Q(\A,\s,b)}\left[\log\frac{Q(\A,\s,b)}{P(\X,\A,\s,b)}\right]
+=\sum_{(i,j)\in\obs}C_{x_{ij}} + \sum_{ik}C_{a_{ik}} + \sum_{kj}C_{s_{kj}} + C_b\,.
+\end{equation}
+The $C_{a_{ik}}$ an $C_{s_{kj}}$ are the same as before. The other two terms are
+\begin{align}
+C_b &= \E_{Q(b)}\left[\log Q(b) - \log P(b)  \right]=\frac{\bbar^2+\btil}{2}-\frac{1}{2}\log \btil - \frac{1}{2}\notag\\
+\hat{C}_{x_{ij}}&=-\int\prod_k\N(a_{ik};\abar_{ik},\atil_{ik})\N(s_{kj};\sbar_{kj},\stil_{kj})\N(b|\bbar,\btil)\log\tau\left(x_{ij}\left(\sum_{k}a_{ik}s_{kj}+b\right),\zeta_{ij}\right) d a_{ik}d s_{kj} \notag\\
+&=-\log\sigma(\zeta_{ij})+\frac{\zeta_{ij}}{2}-\frac{x_{ij}\left( \sum_k\abar_{ik}\sbar_{kj}+\bbar \right)}{2}\notag\\
+&\qquad -\lambda(\zeta_{ij})\left(
+\sum_k\left(\abar_{ik}^2\stil_{kj}+\atil_{ik}\sbar^2_{kj}+\atil_{ik}\stil_{kj}\right)+
+\left(\sum_{k}\abar_{ik}\sbar_{kj}\right)^2+2\bbar\sum_k\abar_{ik}\sbar_{kj}+(\bbar^2+\btil)-\zeta_{ij}^2\right)\,.
+\end{align}
+
+\subsection{Gradients}
+The relevant new gradients and updates are:
+\begin{align}
+\frac{\partial \mathcal{C}}{\partial \btil} &= \frac{1}{2} - \frac{1}{2\btil} - \sum_{(i,j)\in\obs}\lambda(\zeta_{ij})\,\therefore\,\btil \leftarrow \left[ 1 - 2\sum_{(i,j)\in\obs}\lambda(\zeta_{ij})  \right]^{-1} \notag \\
+\frac{\partial \mathcal{C}}{\partial \bbar} &= \bbar - \sum_{(i,j)\in\obs}\frac{x_{ij}}{2}+2\lambda(\zeta_{ij})\left[\sum_k\abar_{ik}\sbar_{kj}+\bbar \right] 
+\,\therefore\,\bbar\leftarrow\frac{\sum_{(ij)\in\obs}x_{ij}/2+2\lambda(\zeta_{ij})\sum_k\abar_{ik}\sbar_{kj}}{1-2\sum_{(i,j)\in\obs}\lambda(\zeta_{ij})} \notag\\
+\frac{\partial \mathcal{C}}{\partial \abar_{il}} &= \abar_{il}-\sum_{j|(i,j)\in\obs}\frac{x_{ij}\sbar_{lj}}{2}+2\lambda(\zeta_{ij})\left[\abar_{il}\stil_{lj}+\sbar_{lj}\sum_k\abar_{ik}\sbar_{kj} 
++ \bbar\sbar_{lj} \right] \notag\\
+\frac{\partial \mathcal{C}}{\partial \sbar_{lj}} &= \frac{\sbar_{lj}}{v_{s_l}}-\sum_{i|(i,j)\in\obs}\frac{x_{ij}\abar_{il}}{2}+2\lambda(\zeta_{ij})\left[\atil_{il}\sbar_{lj}+\abar_{il}\sum_k\abar_{ik}\sbar_{kj}+\bbar\abar_{il}\right] \notag\\
+\zeta_{ij}&\leftarrow \sqrt{\sum_k\left(\abar_{ik}^2\stil_{kj}+ \atil_{ik}\sbar^2_{kj}+\atil_{ik}\stil_{kj}\right)
++ \left(\sum_{k}\abar_{ik}\sbar_{kj}\right)^2 + 2\bbar\sum_k\abar_{ik}\sbar_{kj} + \bbar^2+\btil} \,.\notag
+\end{align}
+
+Note that the update for $b$ can be done exactly.
+
+\section{Fast Approximation}
+In this section we investigate how to make an approximation to \eqref{eqn:likapproxbayes} to speed the algorithm up. The computational complexity of computing the $C_{a_{ik}}$ and $C_{s_{kj}}$ terms in \eqref{eqn:cost} is $\mathcal{O}(IK + KJ)$. The cost of the term that incorporates the likelihood, $\mathcal{O}(|\obs|)=\mathcal{O}(IJ)$ where the second part hold if we have observed a good proportion of the entries (sorry for confusing notation). Because we can choose $K$ to be small we want to reduce the complexity of this term to linear in just the number of $1$s in the sparse matrix, i.e.\,$\mathcal{O}(|\obs^{(+1)}|)$.
+
+To do this we exploit the additivity of the `likelihood' terms in the variational approximation to split it up:
+
+\begin{align}
+C_x &= \sum_{(i,j)\in\obs}C_{x_{ij}} \notag\\
+&= \sum_{(i,j)\in\obs^-}\E_{Q(\A,\s,b)}\left[ -\log P(x_{ij}|\A,\s,b) \right] + 
+\sum_{(i,j)\in\obs^+}\E_{Q(\A,\s,b)}\left[ -\log P(x_{ij}|\A,\s,b) \right] \label{eqn:decomposition}\\
+&\approx \frac{|\obs^-|}{|\obs|}\sum_{(i,j)\in\obs}\E_{Q(\bar{\A},\bar{\s},b)}\left[ -\log P(x_{ij}=-1|\bar{\A},\bar{\s},b) \right] + 
+\sum_{(i,j)\in\obs^{(+1)}}\E_{Q(\A,\s,b)}\left[ -\log P(x_{ij}|\A,\s,b) \right] \notag\\
+&= C_x^{\mathrm{av}} + C_{x^+} \notag
+\end{align}
+most elements in $\obs$ are $-1$, so we approximate the first term in \eqref{eqn:decomposition} with some kind of `average' approximation $C^{\mathrm{av}}_x$. It turns out this averaging trick cannot be done over a partial part of the matrix, so must be done over the whole matrix, then scaled by the fractions of $-1$s. This is likely only to be accurate only if the matrix is sparse.
+
+The approximate term uses the following identities:
+\begin{align}
+\sum_{ij}\sum_k g_{ik}h_{kj} &= \sum_k \left(\sum_ig_{ik}\right)\left(\sum_j h_{kj}\right) = \sum_k g_{\cdot k}h_{k \cdot} \label{eqn:ap1}  \\
+\sum_{ij}\left(\sum_k g_{ik}h_{kj}\right)^2
+&= \sum_k\sum_{k'} \left(\sum_ig_{ik}g_{ik'}\right)\left(\sum_j h_{kj}h_{k'j}\right) \label{eqn:ap2} \\
+&\approx \left(\sum_k \left(\sum_ig_{ik}\right)\left(\sum_j h_{kj}\right) \right)^2  =  \left(\sum_k g_{\cdot k}h_{k \cdot}\right)^2 \label{eqn:ap3} \\
+&\approx \sum_k\left(\sum_i g_{ik}^2 \right)\left(\sum_j g_{kj}^2 \right)
+= \sum_k g_{\cdot k}^2 h_{k\cdot}^2\,. \label{eqn:ap4}
+\end{align}
+where $g_{\cdot k}=\sum_{i}g_{ik}$, $h_{k\cdot}^2=\sum_{j}h_{kj}^2$, etc.
+
+To calculate \eqref{eqn:ap2} exactly would require $\mathcal{O}(IK^2+JK^2)$ precomputations. So two approximations \eqref{eqn:ap3} and \eqref{eqn:ap4} are proposed. Neither are an upper bound or lower bound. It is found that \eqref{eqn:ap4} is much better. The reason for this is that it only misses out the cross terms in the sum over $kk'$. However these terms are the product of the sum of two zero mean sets random variables, $g_{ik}g_{ik'}$ (or roughly zero mean because of the offset parameter $b$). It is very likely that ones of the terms will be almost zero and empirically it is found that this approximation is almost exact. These only require $\mathcal{O}(IK+KJ)$ precompuations as before.
+
+Plugging in the $\tau$ approximation as before, and the approximate term becomes (the equations when using \eqref{eqn:ap3}) are in the Supplementary):
+\begin{align}
+\hat{C}_x^{\mathrm{av}}=&\frac{|\obs^-|}{|\obs|}\left[ 
+\sum_{ij}-\log\sigma({\zeta_{ij}})+\sum_{ij}\frac{\zeta_{ij}}{2}-\frac{(-1)\left(\sum_k\abar_{\cdot k}\sbar_{k\cdot} 
++ |\obs|\bbar \right)}{2}\right. \notag\\
+&\left. \quad -\sum_{ij}\lambda(\zeta_{ij})\frac{1}{|\obs|}\left(\sum_k\left(\abar_{\cdot k}^2\stil_{k\cdot}
++ \atil_{\cdot k}\sbar_{k\cdot}^2 + \atil_{\cdot k}\stil_{k\cdot} \right)+ 
+\sum_{k}\abar_{\cdot k}^2\sbar_{k\cdot}^2 + 2\bbar\sum_k\abar_{\cdot k}\sbar_{k\cdot} + |\obs|(\bbar^2 + \btil) - \sum_{ij}\zeta^2_{ij}  \right) \right]\,,
+\end{align}
+where 
+\begin{equation}
+\atil_{\cdot k}=\sum_i \atil_{ik},\,\, \stil_{k\cdot}=\sum_j \stil_{kj},\,\,
+\abar_{\cdot k}=\sum_i \abar_{ik},\,\, \sbar_{k\cdot}=\sum_j \sbar_{kj},\,\,
+\abar_{\cdot k}^2=\sum_i \abar_{ik}^2,\,\, \sbar_{k\cdot}^2=\sum_j \sbar_{kj}^2\,.\notag
+\end{equation}
+Note that $\abar_{\cdot k}^2=\sum_{i}\abar_{ik}^2$, NOT $\abar_{\cdot k}^2=(\abar_{\cdot k})^2$! (The sum over $i$, or $j$, is always the final operator).
+This could be more accurate by replacing $\left(\sum_k\abar_{\cdot k}\sbar_{k\cdot}\right)^2$ using the middle term in \eqref{eqn:ap2} in stead of inequality, but this would increase complexity of calculating the `likelihood' term from $\mathcal{O}(K(I+J))$ to $\mathcal{O}(K^2(I+J))$. Note that the approximation is necessarily greater than or equal to the exact term, therefore because $\lambda(\zeta)$ is always negative the approximation will be an upper bound to the true function.
+I think many $\abar_{ik},\sbar_{kj}$ are zero, so most cross terms will be zero, so I think this upper bound will be fairly tight.
+
+\paragraph{Dealing with $\zeta_{ij}$}  In one experiment with 2\% sparsity these parameters settles to about 5 with standard deviation 1 quickly. Want to avoid of a sum over $ij$, e.g. $\zeta_{\cdot\cdot}=\sum_{ij}\zeta_{ij}$. However, can calculate exactly in $\mathcal{O}(K)$ $\zeta_{\cdot\cdot}^2$:
+\begin{equation}
+\zeta_{\cdot\cdot}^2 = \sum_k\left(\abar_{\cdot k}^2\stil_{k\cdot}
++ \atil_{\cdot k}\sbar_{k\cdot}^2 + \atil_{\cdot k}\stil_{k\cdot}\right) + 
+\left(\sum_k\abar_{\cdot k}\sbar_{k\cdot}\right) + 2\bbar\sum_k\abar_{\cdot k}\sbar_{k\cdot} + \bbar^2 + \btil \notag\,,
+\end{equation}
+and define $\zbar=\sqrt{\frac{1}{|\obs|}\zeta_{\cdot\cdot}^2}$; this is an upper bound on $\frac{1}{|\obs|}\sum_{ij}\zeta_{ij}$.
+The required terms are approximated as follows:
+\begin{align}
+\sum_{ij}\frac{\zeta_{ij}}{2} &\approx |\obs|\frac{\zbar}{2}\,,\notag\\
+\sum_{ij}-\log\sigma({\zeta_{ij}}) &\approx -|\obs|\log{\sigma(\zbar)}\,,\notag\\
+\lambda(\zeta_{ij}) &\approx \lambda(\zbar) \notag
+\end{align}
+This final approximate likelihood term becomes:
+\begin{align}
+\hat{C}_x^{\mathrm{av}}=&\frac{|\obs^-|}{|\obs|}\left[ 
+-|\obs|\log\sigma({\zbar})+|\obs|\frac{\zbar}{2}-\frac{(-1)\left(\sum_k\abar_{\cdot k}\sbar_{k\cdot} 
++ |\obs|\bbar \right)}{2}\right. \notag\\
+&\left. \quad -\lambda(\zbar)\left(\sum_k\left(\abar_{\cdot k}^2\stil_{k\cdot}
++ \atil_{\cdot k}\sbar_{k\cdot}^2 + \atil_{\cdot k}\stil_{k\cdot} \right)+ 
+\sum_{k}\abar_{\cdot k}^2\sbar_{k\cdot}^2 + 2\bbar\sum_k\abar_{\cdot k}\sbar_{k\cdot} + |\obs|(\bbar^2 + \btil) - \zeta^2_{\cdot\cdot}  \right) \right]\,.
+\end{align}
+
+\subsection{Problem with this method}
+
+This method effectively fits a single Gaussian to all the terms in the matrix, by matching the mean of the squares of $\bar{\zeta}=\sqrt{\zeta_{ij}^2}$, which can be done efficiently becuase $\zeta_{ij}^2$ is a linear function of $\abar,\sbar,\atil$ etc. Then it uses this mean $\bar{\zeta}$ to calculate the terms $\zeta/2$ and $\log\sigma(\zeta_{ij})$. Unfortunately on some datasets this causes some innaccuracy, one should really approximate these terms directly rather than calculate them form $\bar{\zeta}$ 
+
+\subsection{Derivatives}
+
+The derivatives and updates for $\atil_{il}\stil_{lj},\abar_{il},\sbar_{lj},\bbar,\btil,\zeta_{ij}$ for the terms $\sum_{ik}C_{a_{ik}}+\sum_{kj}C_{s_{kj}}+\sum_{(i,j)\in\obs^+}\hat{C}_{x^+}$ are exactly the same as before, except replacing any sums over $(i,j)\in\obs$ with $(i,j)\in\obs^+$. Now we need to add to the gradients the additional effect of $\hat{C}^{\mathrm{ap}}_x$; this is done, for example for $\abar_{il}$ as follows:
+\begin{equation}
+\frac{\partial \mathcal{C}}{\partial \abar_{il}} = \frac{\partial \mathcal{C}}{\partial \abar_{\cdot l}}\frac{\partial\abar_{\cdot l} }{\partial \abar_{il}} + \frac{\partial \mathcal{C}}{\partial \abar_{\cdot l}^2}\frac{\partial\abar_{\cdot l}^2 }{\partial \abar_{il}} = \frac{\partial \mathcal{C}}{\partial \abar_{\cdot l}^2}\cdot1+\frac{\partial \mathcal{C}}{\partial \abar_{\cdot l}}\cdot2\abar_{il}^2\,.
+\end{equation}
+
+Writing out the all the derivatives we now get ($v_{s_k}$ are the same as before):
+
+{\small
+\begin{align}
+\frac{\partial \mathcal{C}}{\partial \atil_{il}} &= \frac{1}{2}-\frac{1}{2\atil_{il}}-\sum_{j|(i,j)\in\obs^+}\lambda(\zeta_{ij})(\sbar_{lj}^2+\stil_{lj}) 
+- \frac{|\obs^-|}{|\obs|}\lambda(\zbar)(\sbar_{l\cdot}^2+\stil_{l\cdot}) \notag\\
+%
+\frac{\partial \mathcal{C}}{\partial \stil_{lj}} &= \frac{1}{2v_{s_l}}-\frac{1}{2\stil_{lj}}-\sum_{i|(i,j)\in\obs^+}\lambda(\zeta_{ij})(\abar_{il}^2+\atil_{il}) 
+- \frac{|\obs^-|}{|\obs|}\lambda(\zbar)(\abar_{\cdot l}^2+\atil_{\cdot l}) \notag\\
+%
+\frac{\partial \mathcal{C}}{\partial \btil} &= \frac{1}{2} - \frac{1}{2\btil} - \sum_{(i,j)\in\obs^+}\lambda(\zeta_{ij})- |\obs^-|\lambda(\zbar) \notag \\
+%
+\frac{\partial \mathcal{C}}{\partial \bbar} &= \bbar - \sum_{(i,j)\in\obs^+}\left\{\frac{x_{ij}}{2}+2\lambda(\zeta_{ij})\left[\sum_k\abar_{ik}\sbar_{kj}+\bbar \right]\right\} 
+-\frac{|\obs^-|}{|\obs|}\left\{\frac{(-1)|\obs|}{2} + 
+2\lambda(\zbar)\left[\sum_k\abar_{\cdot l}\sbar_{l\cdot} + |\obs|\bbar \right] \right\} \notag\\
+%
+\frac{\partial \mathcal{C}}{\partial \abar_{il}} &= \abar_{il}-\sum_{j|(i,j)\in\obs^+}\left\{ \frac{x_{ij}\sbar_{lj}}{2} + 2\lambda(\zeta_{ij})\left[\abar_{il}\stil_{lj}+\sbar_{lj}\sum_k\abar_{ik}\sbar_{kj}+\bbar\sbar_{lj}\right]\right\}
+ - \frac{|\obs^-|}{|\obs|}\left\{\frac{(-1)\sbar_{l\cdot}}{2} + 2\lambda(\zbar)\left[\abar_{il}\stil_{l\cdot} + \abar_{il}\sbar_{l\cdot}^2+\bbar\sbar_{l\cdot} \right] \right\} \notag\\
+%
+\frac{\partial \mathcal{C}}{\partial \sbar_{lj}} &= \frac{\sbar_{lj}}{v_{s_l}}-\sum_{i|(i,j)\in\obs^+}\left\{ \frac{x_{ij}\abar_{il}}{2} + 2\lambda(\zeta_{ij})\left[\atil_{il}\sbar_{lj}+\abar_{il}\sum_k\abar_{ik}\sbar_{kj}+\bbar\abar_{il}\right]\right\}
+ - \frac{|\obs^-|}{|\obs|}\left\{\frac{(-1)\abar_{\cdot l}}{2} + 2\lambda(\zbar)\left[\atil_{\cdot l}\sbar_{lj} + \sbar_{lj}\abar_{\cdot l}^2+\bbar\abar_{\cdot l} \right] \right\} \notag\\
+%
+\frac{\partial^2\mathcal{C}}{\partial \abar_{il}^2} &= 1 - \sum_{j|(i,j)\in\obs^+}2\lambda(\zeta_{ij})\left[ \stil_{lj}+\sbar_{lj}^2\right] 
+- \frac{|\obs^-|}{|\obs|}2\lambda(\zbar)\left[\stil_{l\cdot}+\sbar_{l\cdot}^2\right] \notag \\
+%
+\frac{\partial^2\mathcal{C}}{\partial \sbar_{il}^2} &= \frac{1}{v_{s_l}} - \sum_{i|(i,j)\in\obs^+}2\lambda(\zeta_{ij})\left[ \atil_{il}+\abar_{il}^2\right]
+- \frac{|\obs^-|}{|\obs|}2\lambda(\zbar)\left[\atil_{\cdot l}+\abar_{\cdot l}^2\right]  \notag
+\end{align}
+}
+
+This leads to the following updates:
+
+\begin{align}
+\atil_{il} &\leftarrow \left[1-2\sum_{j|(i,j)\in\mathcal{O}^+}\lambda(\zeta_{ij})
+(\sbar_{lj}^2+\stil_{lj}) - 2\frac{|\obs^-|}{|\obs|}\lambda(\zbar)(\sbar_{l\cdot}^2+\stil_{l\cdot}) \right]^{-1} \notag\\
+%
+\stil_{lj} &\leftarrow \left[\frac{1}{v_{s_l}}-2\sum_{i|(i,j)\in\mathcal{O^+}}\lambda(\zeta_{ij})(\abar_{il}^2+\atil_{il}) - 2\frac{|\obs^-|}{|\obs|}\lambda(\zbar)(\abar_{\cdot l}^2+\atil_{\cdot l} ) \right]^{-1}\notag\\
+%
+\btil &\leftarrow \left[ 1 - 2\sum_{(i,j)\in\obs}\lambda(\zeta_{ij}) - 2|\obs^-|\lambda(\zeta)  \right]^{-1} \notag\\
+%
+\bbar &\leftarrow \frac{\sum_{(ij)\in\obs^+} \left\{ x_{ij}/2+2\lambda(\zeta_{ij})\sum_k\abar_{ik}\sbar_{kj} \right\} + 
+|\obs^-| / |\obs| \left\{(-1)|\obs|/2+2\lambda(\zbar)\sum_k\abar_{\cdot l}\sbar_{l\cdot} \right\}}{1-2\sum_{(i,j)\in\obs}\lambda(\zeta_{ij})-2|\obs^-|\lambda(\zbar)} \notag\\
+%
+\zeta_{ij}&\leftarrow \sqrt{\sum_k\left(\abar_{ik}^2\stil_{kj}+ \atil_{ik}\sbar^2_{kj}+\atil_{ik}\stil_{kj}\right)
++ \left(\sum_{k}\abar_{ik}\sbar_{kj}\right)^2 + 2\bbar\sum_k\abar_{ik}\sbar_{kj} + \bbar^2+\btil} \,.\notag\\
+\zbar &\leftarrow \sqrt{\frac{1}{|\obs|} \sum_k\left(\abar_{\cdot k}^2\stil_{k\cdot}
++ \atil_{\cdot k}\sbar_{k\cdot}^2 + \atil_{\cdot k}\stil_{k\cdot}\right) + 
+\sum_{k}\abar_{\cdot k}^2\sbar_{k\cdot}^2 + 2\bbar\sum_k\abar_{\cdot k}\sbar_{k\cdot} + \bbar^2 + \btil} \notag
+\end{align}
+
+The algorithm first initialises all the parameters, then computes the sums to get $\atil_{\cdot k},\stil_{k\cdot},\abar_{\cdot k},\sbar_{k\cdot},\abar_{\cdot k}^2,\sbar_{k\cdot}^2$. Then it updates the parameters in the following order $\zeta,\{\zeta_{ij}\},\{\atil_{ik},\stil_{kj}\},\btil,\{\abar_{ik}\},\{\sbar_{kj}\},\bbar,\{v_{s_k}\}$.
+
+
+{
+\bibliographystyle{apalike}
+\bibliography{../bibliog}
+}
+
+\end{document}
